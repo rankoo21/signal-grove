@@ -2,6 +2,10 @@
 
 Plant an intent. Let GenLayer sense the world.
 
+- Live app: https://signal-grove.pages.dev
+- Network: GenLayer Testnet Bradbury
+- Contract: `0x7fACa919C98Ea21026C81bb635c0017d3Acc1565`
+
 Signal Grove is a living, spatial GenLayer dApp. You plant a "seed" that carries
 a natural-language watch intent (for example, wake me when a builder
 opportunity or testnet task appears). You grow "roots" that feed the seed
