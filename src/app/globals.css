@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --soil-black: #050706;
+  --soil-moss: #08110d;
+  --root-brown: #3c2b1f;
+  --bio-green: #7cffb2;
+  --bio-ice: #8ddcff;
+  --bio-gold: #ffd978;
+  --bio-violet: #4b2c7a;
+  --mist-white: #eafbf2;
+  --amber: #ffb86b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--soil-black);
+  color: var(--mist-white);
+  font-family: var(--font-body), system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+  /* Layered organic background: deep radial mist over volcanic soil. */
+  background:
+    radial-gradient(900px 700px at 18% 12%, rgba(75, 44, 122, 0.28), transparent 60%),
+    radial-gradient(1100px 800px at 82% 18%, rgba(141, 220, 255, 0.1), transparent 62%),
+    radial-gradient(1200px 900px at 50% 110%, rgba(124, 255, 178, 0.12), transparent 60%),
+    radial-gradient(circle at 50% 50%, #08110d 0%, #050706 70%);
+}
+
+::selection {
+  background: rgba(124, 255, 178, 0.3);
+  color: var(--mist-white);
+}
+
+/* Thin organic scrollbar */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 255, 178, 0.18);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(124, 255, 178, 0.3);
+}
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+/* Living glass surface used by panels and seeds. */
+.organic-glass {
+  background: linear-gradient(
+    150deg,
+    rgba(234, 251, 242, 0.06),
+    rgba(8, 17, 13, 0.4)
+  );
+  border: 1px solid rgba(124, 255, 178, 0.14);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(234, 251, 242, 0.08),
+    0 30px 60px -30px rgba(0, 0, 0, 0.8);
+}
+
+.glow-green {
+  box-shadow: 0 0 30px -6px rgba(124, 255, 178, 0.55);
+}
+.glow-ice {
+  box-shadow: 0 0 30px -6px rgba(141, 220, 255, 0.5);
+}
+.glow-gold {
+  box-shadow: 0 0 30px -6px rgba(255, 217, 120, 0.5);
+}
+
+.text-glow {
+  text-shadow: 0 0 18px rgba(124, 255, 178, 0.45);
+}
+
+/* Soil fissure input: a glowing crack rather than a textarea. */
+.soil-fissure {
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(124, 255, 178, 0.08), transparent 70%),
+    linear-gradient(180deg, rgba(5, 7, 6, 0.2), rgba(5, 7, 6, 0.7));
+  border: none;
+  border-top: 1px solid rgba(124, 255, 178, 0.25);
+  border-bottom: 1px solid rgba(124, 255, 178, 0.12);
+  box-shadow:
+    inset 0 0 40px rgba(124, 255, 178, 0.08),
+    inset 0 2px 30px rgba(0, 0, 0, 0.6);
+  color: var(--mist-white);
+  caret-color: var(--bio-green);
+}
+.soil-fissure::placeholder {
+  color: rgba(234, 251, 242, 0.35);
+}
+.soil-fissure:focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 60px rgba(124, 255, 178, 0.16),
+    0 0 40px -10px rgba(124, 255, 178, 0.4);
+}
+
+/* Reduced motion: calm everything down. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.zone-grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: radial-gradient(rgba(234, 251, 242, 0.6) 0.5px, transparent 0.6px);
+  background-size: 4px 4px;
+  z-index: 1;
+}
