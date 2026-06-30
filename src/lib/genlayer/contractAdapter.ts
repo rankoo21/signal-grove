@@ -29,6 +29,7 @@ type AnyClient = ReturnType<typeof createClient>;
 
 const ACCEPTED = TransactionStatus.ACCEPTED;
 const BURNER_KEY_STORAGE = "signal-grove.firefly.key";
+const IDENTITY_PREF_STORAGE = "signal-grove.identity.mode";
 
 export interface ContractAdapterConfig {
   contractAddress: string;
@@ -46,6 +47,20 @@ function pickChain(network?: string) {
     case "studionet":
     default:
       return studionet;
+  }
+}
+
+// genlayer-js network name expected by client.connect().
+function networkName(network?: string): "studionet" | "testnetBradbury" | "localnet" {
+  switch ((network ?? "studionet").toLowerCase()) {
+    case "bradbury":
+    case "testnet-bradbury":
+    case "testnetbradbury":
+      return "testnetBradbury";
+    case "localnet":
+      return "localnet";
+    default:
+      return "studionet";
   }
 }
 
@@ -68,6 +83,8 @@ export class ContractAdapter implements GroveAdapter {
   private readonly chain: ReturnType<typeof pickChain>;
   private client: AnyClient | null = null;
   private account: ReturnType<typeof createAccount> | null = null;
+  private walletAddress: string | null = null;
+  private usingWallet = false;
 
   constructor(config: ContractAdapterConfig) {
     this.config = config;
@@ -95,8 +112,59 @@ export class ContractAdapter implements GroveAdapter {
     return this.client;
   }
 
-  /** Address of the active firefly identity, or null on the server. */
+  /** Is a browser wallet (MetaMask + GenLayer Snap) available? */
+  hasInjectedWallet(): boolean {
+    return typeof window !== "undefined" && Boolean((window as any).ethereum);
+  }
+
+  /**
+   * Connect a real browser wallet (MetaMask + GenLayer Snap). On success the
+   * adapter signs every write with the connected account instead of the burner
+   * key. Returns the connected address.
+   */
+  async connectWallet(): Promise<string> {
+    if (typeof window === "undefined") {
+      throw new Error("Wallet connect is only available in the browser.");
+    }
+    if (!(window as any).ethereum) {
+      throw new Error(
+        "No browser wallet found. Install MetaMask (with the GenLayer Snap) to connect.",
+      );
+    }
+    // Build a client bound to the injected provider and ask it to connect,
+    // which installs/activates the GenLayer Snap and selects the account.
+    const client = createClient({ chain: this.chain }) as AnyClient;
+    await client.connect(networkName(this.config.network));
+    const addresses = await client.getAddresses();
+    const addr = addresses?.[0];
+    if (!addr) throw new Error("Wallet connected but no account was returned.");
+
+    this.client = client;
+    this.account = null;
+    this.walletAddress = addr;
+    this.usingWallet = true;
+    window.localStorage.setItem(IDENTITY_PREF_STORAGE, "wallet");
+    return addr;
+  }
+
+  /** Drop the wallet connection and fall back to the burner firefly. */
+  disconnectWallet(): void {
+    this.client = null;
+    this.account = null;
+    this.walletAddress = null;
+    this.usingWallet = false;
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(IDENTITY_PREF_STORAGE);
+    }
+  }
+
+  isUsingWallet(): boolean {
+    return this.usingWallet;
+  }
+
+  /** Address of the active identity (wallet if connected, else burner). */
   get ownerAddress(): string | null {
+    if (this.usingWallet) return this.walletAddress;
     if (typeof window === "undefined") return null;
     this.getClient();
     return this.account?.address ?? null;

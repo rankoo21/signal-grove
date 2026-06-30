@@ -11,3 +11,7 @@ dist
 .vercel
 next-env.d.ts
 out
+*.tsbuildinfo
+__pycache__/
+artifacts/
+push.log

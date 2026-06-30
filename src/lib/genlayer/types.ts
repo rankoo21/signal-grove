@@ -120,8 +120,13 @@ export interface PulseResult {
 export interface GroveAdapter {
   readonly mode: "mock" | "contract";
   // Address of the active identity (the firefly). In contract mode this is the
-  // burner key address; in mock mode it is a synthetic demo address.
+  // burner key address or a connected wallet; in mock mode a synthetic address.
   getIdentityAddress(): string | null;
+  // Optional browser-wallet support (contract mode only).
+  hasInjectedWallet?(): boolean;
+  connectWallet?(): Promise<string>;
+  disconnectWallet?(): void;
+  isUsingWallet?(): boolean;
   plantSeed(input: PlantSeedInput): Promise<Seed>;
   attachRoot(input: AttachRootInput): Promise<Root>;
   pulseSeed(seedId: string): Promise<PulseResult>;

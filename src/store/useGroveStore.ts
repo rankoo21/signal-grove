@@ -46,7 +46,7 @@ interface GroveState {
   // wallet / firefly
   walletAddress: string | null;
   walletLabel: string;
-  callFirefly: () => void;
+  callFirefly: () => Promise<void>;
   releaseFirefly: () => void;
 
   // data
@@ -85,9 +85,27 @@ export const useGroveStore = create<GroveState>((set, get) => ({
 
   walletAddress: null,
   walletLabel: "Call your firefly",
-  callFirefly: () => {
-    // In contract mode the identity is the adapter's burner key address.
-    // In mock mode we synthesize a demo address.
+  callFirefly: async () => {
+    // In contract mode with a browser wallet available, connect the real
+    // wallet (MetaMask + GenLayer Snap). Otherwise use the adapter identity
+    // (burner key in contract mode, synthetic in mock mode).
+    if (
+      adapter.mode === "contract" &&
+      adapter.hasInjectedWallet?.() &&
+      adapter.connectWallet
+    ) {
+      set({ busy: true, error: null });
+      try {
+        const addr = await adapter.connectWallet();
+        set({ walletAddress: addr, walletLabel: shortAddress(addr) });
+        return;
+      } catch (e) {
+        set({ error: (e as Error).message });
+        // Fall through to burner identity below.
+      } finally {
+        set({ busy: false });
+      }
+    }
     const real = adapter.getIdentityAddress();
     if (adapter.mode === "contract" && real) {
       set({ walletAddress: real, walletLabel: shortAddress(real) });
@@ -100,8 +118,10 @@ export const useGroveStore = create<GroveState>((set, get) => ({
       ).join("");
     set({ walletAddress: addr, walletLabel: shortAddress(addr) });
   },
-  releaseFirefly: () =>
-    set({ walletAddress: null, walletLabel: "Call your firefly" }),
+  releaseFirefly: () => {
+    adapter.disconnectWallet?.();
+    set({ walletAddress: null, walletLabel: "Call your firefly" });
+  },
 
   seeds: [],
   spores: [],

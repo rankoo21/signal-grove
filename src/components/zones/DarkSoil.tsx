@@ -70,6 +70,7 @@ export function DarkSoil() {
           onChange={(e) => setDraft({ intent: e.target.value })}
           placeholder={placeholder}
           rows={3}
+          dir="auto"
           aria-label="Write your intent into the soil"
           className="soil-fissure w-full resize-none px-7 py-6 text-center font-display text-lg leading-relaxed sm:text-xl"
         />
