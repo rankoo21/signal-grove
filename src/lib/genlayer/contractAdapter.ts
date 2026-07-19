@@ -131,12 +131,30 @@ export class ContractAdapter implements GroveAdapter {
         "No browser wallet found. Install MetaMask (with the GenLayer Snap) to connect.",
       );
     }
-    // Build a client bound to the injected provider and ask it to connect,
-    // which installs/activates the GenLayer Snap and selects the account.
-    const client = createClient({ chain: this.chain }) as AnyClient;
-    await client.connect(networkName(this.config.network));
-    const addresses = await client.getAddresses();
-    const addr = addresses?.[0];
+    const eth = (window as any).ethereum;
+    // Let client.connect() drive the handshake: it installs/activates the
+    // GenLayer Snap and pops MetaMask for account selection. Binding the
+    // injected provider up front keeps the account attached for writes.
+    const client = createClient({ chain: this.chain, provider: eth }) as AnyClient;
+    let addr: string | undefined;
+    try {
+      await client.connect(networkName(this.config.network));
+      const addresses = await client.getAddresses().catch(() => [] as string[]);
+      addr = addresses?.[0];
+    } catch (e: any) {
+      if (e?.code === 4001) throw new Error("Wallet connection was rejected.");
+      throw new Error(
+        "Could not activate the GenLayer Snap in MetaMask. Approve the connection and Snap install, then try again.",
+      );
+    }
+    if (!addr) {
+      try {
+        const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+        addr = accounts?.[0];
+      } catch (e: any) {
+        if (e?.code === 4001) throw new Error("Wallet connection was rejected.");
+      }
+    }
     if (!addr) throw new Error("Wallet connected but no account was returned.");
 
     this.client = client;
@@ -162,9 +180,15 @@ export class ContractAdapter implements GroveAdapter {
     return this.usingWallet;
   }
 
-  /** Address of the active identity (wallet if connected, else burner). */
+  /**
+   * Address of the active identity. On a gasless network the burner firefly is
+   * a valid writer, so its address is returned. On a gas-charging network
+   * (Bradbury) the burner cannot pay, so identity exists only when a wallet is
+   * connected; otherwise null, which tells the UI to prompt for a wallet.
+   */
   get ownerAddress(): string | null {
     if (this.usingWallet) return this.walletAddress;
+    if (this.requiresFunds) return null;
     if (typeof window === "undefined") return null;
     this.getClient();
     return this.account?.address ?? null;
@@ -190,36 +214,80 @@ export class ContractAdapter implements GroveAdapter {
     return toPlain(raw) as T;
   }
 
+  // True when the target network charges gas. studionet is gasless (a burner
+  // key can write); Bradbury and localnet require a funded signer, so writes
+  // must go through a connected wallet, not the zero-balance burner.
+  private get requiresFunds(): boolean {
+    return networkName(this.config.network) !== "studionet";
+  }
+
+  // Resolve the client that must SIGN a write. On a gas-charging network a
+  // connected wallet is mandatory: signing with the empty burner key produces
+  // the confusing RPC error "sender does not have enough funds (0)". We fail
+  // early with a clear, actionable message instead.
+  private getWriteClient(): AnyClient {
+    if (this.usingWallet && this.client) return this.client;
+    if (this.requiresFunds) {
+      throw new Error(
+        "Connect a funded wallet to plant here. This network charges gas, so a browser wallet (MetaMask + GenLayer Snap) funded from the Bradbury faucet is required to write.",
+      );
+    }
+    return this.getClient();
+  }
+
+  // Translate raw RPC/consensus errors into plain guidance for the UI.
+  private explainWriteError(e: unknown): Error {
+    const msg = String((e as any)?.message ?? e);
+    if (/enough funds|insufficient|cover transaction fees/i.test(msg)) {
+      return new Error(
+        "This wallet has no Bradbury funds. Claim test GEN from the Bradbury faucet, then try again.",
+      );
+    }
+    if (/user rejected|4001/i.test(msg)) {
+      return new Error("The transaction was rejected in your wallet.");
+    }
+    return e instanceof Error ? e : new Error(msg);
+  }
+
   private async writeAndWait(functionName: string, args: unknown[]): Promise<void> {
-    const client = this.getClient();
-    const hash = await client.writeContract({
-      address: this.address,
-      functionName,
-      args: args as any,
-      value: 0n,
-    });
-    await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    const client = this.getWriteClient();
+    try {
+      const hash = await client.writeContract({
+        address: this.address,
+        functionName,
+        args: args as any,
+        value: 0n,
+      });
+      await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    } catch (e) {
+      throw this.explainWriteError(e);
+    }
   }
 
   // -- writes ----------------------------------------------------------
 
   async plantSeed(input: PlantSeedInput): Promise<Seed> {
-    const client = this.getClient();
-    const hash = await client.writeContract({
-      address: this.address,
-      functionName: "plant_seed",
-      args: [
-        input.name,
-        input.intent,
-        input.sensitivity,
-        input.preferredLanguage,
-        input.categories,
-        input.lifespan,
-        Date.now(),
-      ] as any,
-      value: 0n,
-    });
-    const receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    const client = this.getWriteClient();
+    let receipt: any;
+    try {
+      const hash = await client.writeContract({
+        address: this.address,
+        functionName: "plant_seed",
+        args: [
+          input.name,
+          input.intent,
+          input.sensitivity,
+          input.preferredLanguage,
+          input.categories,
+          input.lifespan,
+          Date.now(),
+        ] as any,
+        value: 0n,
+      });
+      receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    } catch (e) {
+      throw this.explainWriteError(e);
+    }
     const seedId = this.extractReturn<string>(receipt);
     const seed = seedId ? await this.getSeed(seedId) : null;
     if (seed) return seed;
@@ -231,22 +299,27 @@ export class ContractAdapter implements GroveAdapter {
   }
 
   async attachRoot(input: AttachRootInput): Promise<Root> {
-    const client = this.getClient();
-    const hash = await client.writeContract({
-      address: this.address,
-      functionName: "attach_root",
-      args: [
-        input.seedId,
-        input.type,
-        input.label,
-        input.url,
-        input.contentSnapshot,
-        input.trustNote,
-        Date.now(),
-      ] as any,
-      value: 0n,
-    });
-    const receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    const client = this.getWriteClient();
+    let receipt: any;
+    try {
+      const hash = await client.writeContract({
+        address: this.address,
+        functionName: "attach_root",
+        args: [
+          input.seedId,
+          input.type,
+          input.label,
+          input.url,
+          input.contentSnapshot,
+          input.trustNote,
+          Date.now(),
+        ] as any,
+        value: 0n,
+      });
+      receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    } catch (e) {
+      throw this.explainWriteError(e);
+    }
     const rootId = this.extractReturn<string>(receipt);
     const roots = await this.getRoots(input.seedId);
     const found = roots.find((r) => r.id === rootId) ?? roots[roots.length - 1];
@@ -255,14 +328,19 @@ export class ContractAdapter implements GroveAdapter {
   }
 
   async pulseSeed(seedId: string): Promise<PulseResult> {
-    const client = this.getClient();
-    const hash = await client.writeContract({
-      address: this.address,
-      functionName: "pulse_seed",
-      args: [seedId, Date.now()] as any,
-      value: 0n,
-    });
-    const receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    const client = this.getWriteClient();
+    let receipt: any;
+    try {
+      const hash = await client.writeContract({
+        address: this.address,
+        functionName: "pulse_seed",
+        args: [seedId, Date.now()] as any,
+        value: 0n,
+      });
+      receipt = await client.waitForTransactionReceipt({ hash, status: ACCEPTED });
+    } catch (e) {
+      throw this.explainWriteError(e);
+    }
     const out = toPlain(this.extractReturn<any>(receipt)) ?? {};
 
     const result: PulseResult = {
