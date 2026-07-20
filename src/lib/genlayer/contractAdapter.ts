@@ -132,20 +132,28 @@ export class ContractAdapter implements GroveAdapter {
       );
     }
     const eth = (window as any).ethereum;
-    // 1. Unlock MetaMask first so the account is available. This must succeed
-    //    before the Snap handshake; if the user rejects here, stop cleanly.
+    // 1. Unlock MetaMask and get the selected address FIRST.
+    let addr: string | undefined;
     try {
-      await eth.request({ method: "eth_requestAccounts" });
+      const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+      addr = accounts?.[0];
     } catch (e: any) {
       if (e?.code === 4001) throw new Error("Wallet connection was rejected.");
       throw new Error("Could not reach MetaMask. Unlock it and try again.");
     }
+    if (!addr) throw new Error("MetaMask returned no account. Unlock it and try again.");
 
-    // 2. client.connect() drives the GenLayer Snap install/activation and the
-    //    network switch. It talks to window.ethereum directly, so we do not
-    //    pass a provider into createClient. If the Snap step fails we surface
-    //    MetaMask's REAL reason instead of hiding it, so the cause is visible.
-    const client = createClient({ chain: this.chain }) as AnyClient;
+    // 2. Create the client WITH the account address up front. genlayer-js
+    //    validates client.account on every write ("No account set" otherwise),
+    //    and setting it after construction does not take, so it must be passed
+    //    to createClient here. Signing still routes through the GenLayer Snap.
+    const client = createClient({
+      chain: this.chain,
+      account: addr as `0x${string}`,
+    }) as AnyClient;
+
+    // 3. Activate the GenLayer Snap and switch the network. Surface MetaMask's
+    //    real reason if this step fails.
     try {
       await client.connect(networkName(this.config.network));
     } catch (e: any) {
@@ -160,25 +168,6 @@ export class ContractAdapter implements GroveAdapter {
       );
     }
 
-    // 3. Resolve the address, via the Snap first, then the provider.
-    let addr: string | undefined;
-    try {
-      const addresses = await client.getAddresses().catch(() => [] as string[]);
-      addr = addresses?.[0];
-    } catch {
-      /* fall through to provider accounts */
-    }
-    if (!addr) {
-      const accounts: string[] = await eth.request({ method: "eth_accounts" }).catch(() => []);
-      addr = accounts?.[0];
-    }
-    if (!addr) throw new Error("Wallet connected but no account was returned.");
-
-    // connect() activates the Snap and switches the network but does NOT set
-    // client.account. genlayer-js validates client.account on every write
-    // ("No account set" otherwise), so attach the connected address here.
-    // Signing still goes through the GenLayer Snap in MetaMask.
-    (client as any).account = addr as `0x${string}`;
     this.client = client;
     this.account = null;
     this.walletAddress = addr;
