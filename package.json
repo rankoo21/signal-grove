@@ -1,13 +1,19 @@
 {
-  "name": "signal-grove",
+  "name": "buildproof",
   "version": "0.1.0",
   "private": true,
-  "description": "Plant an intent. Let GenLayer sense the world.",
+  "description": "Consensus-backed implementation checks on GenLayer.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "contract:lint": "genvm-lint check contracts/BuildProofContract.py --json",
+    "test:direct": "python -m pytest tests/direct/ -p gltest_direct -q",
+    "validate": "npm run contract:lint && npm run test:direct && npm run typecheck && npm run build",
+    "deploy": "node scripts/deploy.mjs",
+    "livecheck": "node scripts/livecheck.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "framer-motion": "^11.3.0",

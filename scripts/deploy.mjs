@@ -23,7 +23,7 @@ import { TransactionStatus } from "genlayer-js/types";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 const envPath = join(root, ".env.deploy");
-const contractPath = join(root, "contracts", "SignalGroveContract.py");
+const contractPath = join(root, "contracts", "BuildProofContract.py");
 
 function parseEnv(path) {
   const out = {};
@@ -53,10 +53,10 @@ function pickChain(name) {
 
 function writeBackAddress(path, address) {
   let text = existsSync(path) ? readFileSync(path, "utf8") : "";
-  if (/^GROVE_CONTRACT_ADDRESS=.*$/m.test(text)) {
-    text = text.replace(/^GROVE_CONTRACT_ADDRESS=.*$/m, `GROVE_CONTRACT_ADDRESS=${address}`);
+  if (/^BUILDPROOF_CONTRACT_ADDRESS=.*$/m.test(text)) {
+    text = text.replace(/^BUILDPROOF_CONTRACT_ADDRESS=.*$/m, `BUILDPROOF_CONTRACT_ADDRESS=${address}`);
   } else {
-    text += (text.endsWith("\n") || text === "" ? "" : "\n") + `GROVE_CONTRACT_ADDRESS=${address}\n`;
+    text += (text.endsWith("\n") || text === "" ? "" : "\n") + `BUILDPROOF_CONTRACT_ADDRESS=${address}\n`;
   }
   writeFileSync(path, text);
 }
@@ -82,7 +82,7 @@ async function main() {
   const client = createClient(clientOpts);
 
   const code = readFileSync(contractPath);
-  console.log("Deploying SignalGroveContract...");
+  console.log("Deploying BuildProofContract...");
 
   const txHash = await client.deployContract({ code, args: [] });
   console.log(`Deploy tx: ${txHash}`);
@@ -110,15 +110,15 @@ async function main() {
   }
 
   console.log("");
-  console.log("Deployed SignalGroveContract at:");
+  console.log("Deployed BuildProofContract at:");
   console.log("  " + address);
   writeBackAddress(envPath, address);
 
   console.log("");
   console.log("Add these to your frontend env (.env.local) to go live:");
-  console.log(`  NEXT_PUBLIC_GROVE_MODE=contract`);
-  console.log(`  NEXT_PUBLIC_GROVE_CONTRACT=${address}`);
-  console.log(`  NEXT_PUBLIC_GROVE_NETWORK=${networkName}`);
+  console.log(`  NEXT_PUBLIC_BUILDPROOF_MODE=contract`);
+  console.log(`  NEXT_PUBLIC_BUILDPROOF_CONTRACT=${address}`);
+  console.log(`  NEXT_PUBLIC_BUILDPROOF_NETWORK=${networkName}`);
 }
 
 main().catch((err) => {

@@ -1,287 +1,122 @@
-import {
-  AttachRootInput,
-  Bloom,
-  GroveAdapter,
-  PlantSeedInput,
-  PulseResult,
-  Root,
-  RootHealth,
-  Seed,
-  Spore,
+import type {
+  BuildProofAdapter,
+  BuildProofResult,
+  BuildProofSummary,
+  CriterionCheck,
+  PhaseListener,
+  SubmitInput,
+  SubmissionOutcome,
+  SubmissionUpdate,
+  Verdict,
 } from "./types";
-import { deriveVisualDNA } from "./visualDNA";
-import { decidePulse } from "@/utils/seedState";
-import { makeId, mockTxHash } from "@/utils/format";
-import { pickBloomTemplate } from "@/data/mockBlooms";
 
-const MOCK_OWNER = "0xF1re_fly_demo_grove_owner_0000";
+const MOCK_ACCOUNT = "0x00000000000000000000000000000000b17d000f";
+const results: BuildProofResult[] = [];
 
-// Health inferred from a root's content and type. Manual roots are paper-like,
-// empty content is clouded, broken urls are broken, otherwise fresh.
-function inferHealth(type: Root["type"], url: string, content: string): RootHealth {
-  if (type === "manual") return "manual";
-  if (!content.trim()) return "clouded";
-  if (url && !/^https?:\/\//.test(url)) return "broken";
-  return "fresh";
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// In-memory store. Mirrors what the contract would hold authoritatively.
-class MockStore {
-  seeds = new Map<string, Seed>();
-  roots = new Map<string, Root>();
-  blooms = new Map<string, Bloom>();
-  spores = new Map<string, Spore>();
-  seeded = false;
+function tokens(value: string) {
+  return new Set(value.toLowerCase().match(/[a-z0-9]+/g) ?? []);
 }
 
-const store = new MockStore();
-
-function seedDefaults() {
-  if (store.seeded) return;
-  store.seeded = true;
-
-  const presets: Array<Omit<PlantSeedInput, "owner">> = [
-    {
-      name: "GenLayer Builder Watch",
-      intent:
-        "Wake when GenLayer announces a new builder opportunity, bounty, testnet task, or hackathon.",
-      sensitivity: "hungry",
-      preferredLanguage: "english",
-      categories: ["builder", "testnet", "ecosystem"],
-      lifespan: "permanent",
-    },
-    {
-      name: "Intelligent Contract Docs Watch",
-      intent:
-        "Stir when documentation about Intelligent Contracts, GenVM, or contract deployment changes.",
-      sensitivity: "balanced",
-      preferredLanguage: "english",
-      categories: ["documentation", "technical"],
-      lifespan: "30-days",
-    },
-    {
-      name: "Spanish Community Signal",
-      intent:
-        "Bloom when there is a public opportunity for Spanish-speaking GenLayer community content.",
-      sensitivity: "balanced",
-      preferredLanguage: "spanish",
-      categories: ["community", "grants"],
-      lifespan: "seasonal",
-    },
-    {
-      name: "Arabic Community Signal",
-      intent:
-        "Bloom when there is a public opportunity for Arabic educational content, quizzes, events, or onboarding.",
-      sensitivity: "quiet",
-      preferredLanguage: "arabic",
-      categories: ["community", "ecosystem"],
-      lifespan: "seasonal",
-    },
-    {
-      name: "Ecosystem Release Watch",
-      intent:
-        "Wake when the ecosystem announces technical releases, new tooling, or developer resources.",
-      sensitivity: "hungry",
-      preferredLanguage: "english",
-      categories: ["technical", "ecosystem"],
-      lifespan: "permanent",
-    },
-  ];
-
-  const states: Seed["state"][] = ["dormant", "rooting", "stirring", "dormant", "rooting"];
-
-  presets.forEach((preset, i) => {
-    const id = makeId("seed");
-    const now = Date.now() - (presets.length - i) * 1000 * 60 * 60;
-    const seed: Seed = {
-      id,
-      owner: MOCK_OWNER,
-      ...preset,
-      state: states[i],
-      createdAt: now,
-      lastPulseAt: i % 2 === 0 ? now + 1000 * 60 * 30 : null,
-      rootIds: [],
-      bloomIds: [],
-      visualDNA: deriveVisualDNA(preset.preferredLanguage, preset.sensitivity),
-    };
-    store.seeds.set(id, seed);
-  });
+function evaluate(requirement: string, evidence: string, index: number): CriterionCheck {
+  const ignored = new Set(["the", "and", "for", "with", "from", "that", "this", "must", "should", "will", "has", "have"]);
+  const requirementTokens = [...tokens(requirement)].filter((token) => token.length > 2 && !ignored.has(token));
+  const evidenceTokens = tokens(evidence);
+  const matches = requirementTokens.filter((token) => evidenceTokens.has(token));
+  const ratio = requirementTokens.length ? matches.length / requirementTokens.length : 0;
+  const status: Verdict = ratio >= 0.65 ? "pass" : ratio >= 0.3 ? "partial" : "fail";
+  const lowerEvidence = evidence.toLowerCase();
+  const matched = matches.find((token) => lowerEvidence.includes(token));
+  let excerpt = "";
+  if (matched) {
+    const start = Math.max(0, lowerEvidence.indexOf(matched) - 55);
+    excerpt = evidence.slice(start, Math.min(evidence.length, start + 180)).trim();
+  }
+  const explanation = status === "pass"
+    ? "The submitted evidence directly covers the main terms in this requirement."
+    : status === "partial"
+      ? "The evidence overlaps with this requirement but does not fully demonstrate completion."
+      : "The submitted evidence does not demonstrate this requirement.";
+  return { id: `criterion-${index + 1}`, status, explanation, evidenceExcerpt: excerpt };
 }
 
-// Small artificial latency so transitions feel physical, not instant.
-function delay<T>(value: T, ms = 420): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+function mockHash(input: string) {
+  let hash = 2166136261;
+  for (const char of input) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return `0x${Math.abs(hash).toString(16).padStart(8, "0")}${"0".repeat(56)}`;
 }
 
-export class MockAdapter implements GroveAdapter {
+export class MockAdapter implements BuildProofAdapter {
   readonly mode = "mock" as const;
+  private walletAddress: string | null = null;
 
-  constructor() {
-    seedDefaults();
+  hasInjectedWallet(): boolean { return true; }
+  getWalletAddress(): string | null { return this.walletAddress; }
+
+  async connectWallet(): Promise<string> {
+    await delay(120);
+    this.walletAddress = MOCK_ACCOUNT;
+    return MOCK_ACCOUNT;
   }
 
-  getIdentityAddress(): string | null {
-    return MOCK_OWNER;
+  private emit(listener: PhaseListener | undefined, update: SubmissionUpdate) {
+    listener?.(update);
   }
 
-  async plantSeed(input: PlantSeedInput): Promise<Seed> {
-    const id = makeId("seed");
-    const seed: Seed = {
-      id,
-      owner: input.owner || MOCK_OWNER,
-      name: input.name,
-      intent: input.intent,
-      sensitivity: input.sensitivity,
-      preferredLanguage: input.preferredLanguage,
-      categories: input.categories,
-      lifespan: input.lifespan,
-      state: "dormant",
+  async submit(input: SubmitInput, onPhase?: PhaseListener): Promise<SubmissionOutcome> {
+    if (!this.walletAddress) throw new Error("Connect the local preview identity first.");
+    if (results.some((item) => item.sender === this.walletAddress && item.requestId === input.requestId)) {
+      throw new Error("request_id already exists for this sender");
+    }
+    this.emit(onPhase, { phase: "awaiting-signature", requestId: input.requestId, message: "Preparing local preview." });
+    await delay(220);
+    const txHash = mockHash(`${input.requestId}:${Date.now()}`);
+    this.emit(onPhase, { phase: "submitted", requestId: input.requestId, txHash, message: "Local preview submitted." });
+    await delay(320);
+    this.emit(onPhase, { phase: "validators-evaluating", requestId: input.requestId, txHash, message: "Running deterministic preview checks." });
+    const criteria = input.requirements.map((requirement, index) => evaluate(requirement, input.evidence, index));
+    const statuses = criteria.map((item) => item.status);
+    const verdict: Verdict = statuses.includes("fail") ? "fail" : statuses.includes("partial") ? "partial" : "pass";
+    const result: BuildProofResult = {
+      requestId: input.requestId,
+      sender: this.walletAddress,
+      verdict,
+      confidence: criteria.every((item) => item.evidenceExcerpt) ? "medium" : "low",
+      criteria,
+      explanation: verdict === "pass"
+        ? "The local preview found evidence for every requirement. Contract mode adds GenLayer validator consensus."
+        : verdict === "partial"
+          ? "The local preview found incomplete support for at least one requirement."
+          : "The local preview found one or more requirements without sufficient implementation evidence.",
+      evidenceExcerpts: criteria.map((item) => item.evidenceExcerpt).filter(Boolean),
       createdAt: Date.now(),
-      lastPulseAt: null,
-      rootIds: [],
-      bloomIds: [],
-      visualDNA: deriveVisualDNA(input.preferredLanguage, input.sensitivity),
     };
-    store.seeds.set(id, seed);
-    return delay(seed);
+    results.unshift(result);
+    this.emit(onPhase, { phase: "accepted", requestId: input.requestId, txHash, message: "Preview decision accepted." });
+    await delay(160);
+    const outcome: SubmissionOutcome = { phase: "state-confirmed", requestId: input.requestId, txHash, result, message: "Preview result stored for this session." };
+    this.emit(onPhase, outcome);
+    return outcome;
   }
 
-  async attachRoot(input: AttachRootInput): Promise<Root> {
-    const seed = store.seeds.get(input.seedId);
-    if (!seed) throw new Error("The seed could not be found in the soil.");
+  async recover(): Promise<null> { return null; }
 
-    const id = makeId("root");
-    const root: Root = {
-      id,
-      seedId: input.seedId,
-      type: input.type,
-      label: input.label,
-      url: input.url,
-      contentSnapshot: input.contentSnapshot,
-      trustNote: input.trustNote,
-      health: inferHealth(input.type, input.url, input.contentSnapshot),
-      active: true,
-      lastCheckedAt: Date.now(),
-    };
-    store.roots.set(id, root);
-    seed.rootIds.push(id);
-    // Attaching a living root nudges a dormant seed into rooting.
-    if (seed.state === "dormant" && root.health !== "broken") {
-      seed.state = "rooting";
-    }
-    return delay(root);
+  async getResult(requestId: string): Promise<BuildProofResult | null> {
+    return results.find((item) => item.requestId === requestId && item.sender === this.walletAddress) ?? null;
   }
 
-  async pulseSeed(seedId: string): Promise<PulseResult> {
-    const seed = store.seeds.get(seedId);
-    if (!seed) throw new Error("The grove could not pulse this seed.");
-
-    const roots = seed.rootIds
-      .map((rid) => store.roots.get(rid))
-      .filter((r): r is Root => Boolean(r));
-
-    if (roots.length === 0) {
-      throw new Error("Attach at least one root before pulsing.");
-    }
-
-    const now = Date.now();
-    const previousState = seed.state;
-    const decision = decidePulse(seed, roots, now);
-
-    seed.lastPulseAt = now;
-    seed.state = decision.nextState;
-
-    // Refresh root timestamps to feel alive.
-    for (const r of roots) r.lastCheckedAt = now;
-
-    const result: PulseResult = {
-      seedId,
-      previousState,
-      nextState: decision.nextState,
-      note: decision.note,
-    };
-
-    if (decision.nextState === "blooming") {
-      const tpl = pickBloomTemplate(decision.strongestMatch.matched);
-      const sourceTrail = roots
-        .filter((r) => r.active)
-        .map((r) => r.label)
-        .join(" \u00b7 ");
-      const bloom: Bloom = {
-        id: makeId("bloom"),
-        seedId,
-        title: tpl.title,
-        whatSurfaced: tpl.whatSurfaced,
-        sourceTrail: sourceTrail || "Manual note",
-        whyItMatches: tpl.whyItMatches,
-        suggestedNextMove: tpl.suggestedNextMove,
-        createdAt: now,
-        preserved: false,
-      };
-      store.blooms.set(bloom.id, bloom);
-      seed.bloomIds.push(bloom.id);
-      result.bloom = bloom;
-    }
-
-    return delay(result);
+  async getResults(offset = 0, limit = 20): Promise<BuildProofResult[]> {
+    return results.slice(offset, offset + limit);
   }
 
-  async preserveBloom(bloomId: string): Promise<Spore> {
-    const bloom = store.blooms.get(bloomId);
-    if (!bloom) throw new Error("That bloom has already faded.");
-    const seed = store.seeds.get(bloom.seedId);
-
-    bloom.preserved = true;
-    if (seed) seed.state = "archived";
-
-    const spore: Spore = {
-      id: makeId("spore"),
-      bloomId,
-      seedIntent: seed?.intent ?? "",
-      title: bloom.title,
-      memoryText: bloom.whatSurfaced,
-      sourceTrail: bloom.sourceTrail,
-      suggestedNextMove: bloom.suggestedNextMove,
-      preservedAt: Date.now(),
-      language: seed?.preferredLanguage ?? "english",
-      categories: seed?.categories ?? [],
-      mockTxHash: mockTxHash(),
-    };
-    store.spores.set(spore.id, spore);
-    return delay(spore);
-  }
-
-  async witherSeed(seedId: string): Promise<Seed> {
-    const seed = store.seeds.get(seedId);
-    if (!seed) throw new Error("The seed could not be found in the soil.");
-    seed.state = "withered";
-    return delay(seed);
-  }
-
-  async getSeed(seedId: string): Promise<Seed | null> {
-    return delay(store.seeds.get(seedId) ?? null, 80);
-  }
-
-  async getSeeds(): Promise<Seed[]> {
-    return delay(
-      [...store.seeds.values()].sort((a, b) => b.createdAt - a.createdAt),
-      80,
-    );
-  }
-
-  async getRoots(seedId: string): Promise<Root[]> {
-    const seed = store.seeds.get(seedId);
-    if (!seed) return delay([], 60);
-    return delay(
-      seed.rootIds.map((id) => store.roots.get(id)).filter((r): r is Root => Boolean(r)),
-      60,
-    );
-  }
-
-  async getSpores(): Promise<Spore[]> {
-    return delay(
-      [...store.spores.values()].sort((a, b) => b.preservedAt - a.preservedAt),
-      80,
-    );
+  async getSummary(): Promise<BuildProofSummary> {
+    return results.reduce<BuildProofSummary>((summary, item) => {
+      summary.total += 1;
+      summary[item.verdict] += 1;
+      return summary;
+    }, { total: 0, pass: 0, partial: 0, fail: 0 });
   }
 }

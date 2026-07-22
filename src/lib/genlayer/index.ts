@@ -1,23 +1,20 @@
-import type { GroveAdapter } from "./types";
-import { MockAdapter } from "./mockAdapter";
+import type { BuildProofAdapter } from "./types";
 import { ContractAdapter } from "./contractAdapter";
+import { MockAdapter } from "./mockAdapter";
 
-// Single place that decides which adapter is live. The UI imports getAdapter()
-// and never imports a concrete adapter directly.
-let cached: GroveAdapter | null = null;
+let cached: BuildProofAdapter | null = null;
 
-export function getAdapter(): GroveAdapter {
+export function getAdapter(): BuildProofAdapter {
   if (cached) return cached;
 
-  const mode = process.env.NEXT_PUBLIC_GROVE_MODE ?? "mock";
-  const contractAddress = process.env.NEXT_PUBLIC_GROVE_CONTRACT ?? "";
-  const network = process.env.NEXT_PUBLIC_GROVE_NETWORK ?? "studionet";
+  const mode = process.env.NEXT_PUBLIC_BUILDPROOF_MODE ?? "mock";
+  const contractAddress = process.env.NEXT_PUBLIC_BUILDPROOF_CONTRACT ?? "";
+  const network = process.env.NEXT_PUBLIC_BUILDPROOF_NETWORK ?? "bradbury";
 
-  if (mode === "contract" && contractAddress) {
-    cached = new ContractAdapter({ contractAddress, network });
-  } else {
-    cached = new MockAdapter();
-  }
+  cached =
+    mode === "contract" && contractAddress
+      ? new ContractAdapter({ contractAddress, network })
+      : new MockAdapter();
   return cached;
 }
 
