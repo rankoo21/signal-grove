@@ -136,18 +136,15 @@ def test_validator_rejects_divergent_verdict(deploy, direct_vm):
     assert direct_vm.run_validator(leader_result=divergent) is False
 
 
-def test_validator_rejects_divergent_criterion_status(deploy, direct_vm):
-    result = submit(deploy, "validator-criterion")
-    divergent = dict(result)
-    divergent["criteria"] = [dict(result["criteria"][0], status="partial")]
-    assert direct_vm.run_validator(leader_result=divergent) is False
-
-
-def test_validator_rejects_confidence_more_than_one_band_apart(deploy, direct_vm):
+def test_validator_accepts_same_verdict_with_differing_confidence(deploy, direct_vm):
+    # Consensus compares only the load-bearing verdict. A validator that reaches
+    # the same verdict with a different confidence band must still agree, so
+    # honest nondeterministic variation does not push the transaction to
+    # UNDETERMINED.
     result = submit(deploy, "validator-confidence")
     divergent = dict(result)
     divergent["confidence"] = "low"
-    assert direct_vm.run_validator(leader_result=divergent) is False
+    assert direct_vm.run_validator(leader_result=divergent) is True
 
 
 def test_page_bounds_are_validated(deploy, direct_vm):

@@ -175,21 +175,14 @@ def _consensus_assessment(payload: dict) -> dict:
         leader = leaders_res.calldata
         if not isinstance(leader, dict):
             return False
-        if leader.get("verdict") != validator.get("verdict"):
-            return False
-        leader_checks = leader.get("criteria", [])
-        validator_checks = validator.get("criteria", [])
-        if len(leader_checks) != len(validator_checks):
-            return False
-        for index in range(len(leader_checks)):
-            left = leader_checks[index]
-            right = validator_checks[index]
-            if left.get("id") != right.get("id") or left.get("status") != right.get("status"):
-                return False
-        confidence_distance = abs(
-            CONFIDENCE.index(leader.get("confidence")) - CONFIDENCE.index(validator.get("confidence"))
-        )
-        return confidence_distance <= 1
+        # Consensus compares only the load-bearing overall verdict. Per-criterion
+        # statuses and exact confidence vary between independent LLM runs;
+        # requiring exact agreement on every criterion drives honest validators
+        # to UNDETERMINED. The overall verdict (pass / partial / fail) is the
+        # stable decision, and it is already deterministically derived from the
+        # criterion statuses inside _assess, so agreeing on the verdict means the
+        # validators agree on the material outcome.
+        return leader.get("verdict") == validator.get("verdict")
 
     return gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
